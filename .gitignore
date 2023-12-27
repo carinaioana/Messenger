@@ -1,0 +1,17 @@
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+
+# Ignore log files
+*.log
+
+# Ignore virtual environment directory
+venv/
+
+# Ignore specific files
+encryption_server.py
+encyption_client.py
+images.py
+
+# Ignore specific folders
+server_chat_history/
