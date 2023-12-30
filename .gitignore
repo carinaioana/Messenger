@@ -8,10 +8,5 @@ __pycache__/
 # Ignore virtual environment directory
 venv/
 
-# Ignore specific files
-encryption_server.py
-encyption_client.py
-images.py
-
 # Ignore specific folders
 server_chat_history/
