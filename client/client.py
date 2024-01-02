@@ -11,10 +11,13 @@ from PIL import Image, ImageTk
 from cryptography.fernet import Fernet
 import rsa
 
-DARK_GRAY = "#3a3a3a"
-LIGHT_GRAY = "#f5f5f5"
+DARK_BLUE = "#283593"
+LIGHT_BLUE = "#4a90e2"
+
 WHITE = "#ffffff"
-FONT_NAME = "Helvetica"
+BLACK = "#000000"
+
+FONT_NAME = "Arial"
 FONT_SIZE = 12
 BUFFER_SIZE = 1024
 
@@ -44,17 +47,17 @@ class ChatApplication:
         self.create_login_widgets()
 
     def create_login_widgets(self):
-        self.root.configure(bg=DARK_GRAY)
+        self.root.configure(bg=LIGHT_BLUE)
 
-        label = tk.Label(self.root, text="Enter your ID: ", bg=DARK_GRAY, fg=WHITE, font=(FONT_NAME, FONT_SIZE))
+        label = tk.Label(self.root, text="Enter your ID: ", bg=LIGHT_BLUE, fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
         label.pack()
 
-        self.entry = tk.Entry(self.root, bg=LIGHT_GRAY, fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
+        self.entry = tk.Entry(self.root, bg=WHITE, fg=LIGHT_BLUE, font=(FONT_NAME, FONT_SIZE))
         self.entry.pack()
 
         self.entry.bind("<Return>", self.login)
 
-        button_login = tk.Button(self.root, text="Login", command=self.login, bg=LIGHT_GRAY, fg=DARK_GRAY,
+        button_login = tk.Button(self.root, text="Login", command=self.login, bg=WHITE, fg=DARK_BLUE,
                                  font=(FONT_NAME, FONT_SIZE))
         button_login.pack()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -76,30 +79,34 @@ class ChatApplication:
             else:
                 self.create_chat_widgets()
                 if self.text:
+                    self.text.config(state=tk.NORMAL)
                     self.text.insert(tk.END, server_response + '\n')
+                    self.text.config(state=tk.DISABLED)
 
     def create_chat_widgets(self):
         self.destroy_widgets()
 
         self.root.title("Chat Application")
-        self.root.configure(bg=DARK_GRAY)
+        self.root.configure(bg=LIGHT_BLUE)
 
-        self.text = tk.Text(self.root, bg=LIGHT_GRAY, fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
+        self.text = tk.Text(self.root, bg=WHITE, fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
+        self.text.config(state=tk.DISABLED)
+
         scrollbar = tk.Scrollbar(self.root, command=self.text.yview)
         self.text.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text.pack(pady=10, expand=True, fill=tk.BOTH)
 
-        self.entry = tk.Entry(self.root, width=50, bg=LIGHT_GRAY, fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
+        self.entry = tk.Entry(self.root, width=50, bg=WHITE, fg=LIGHT_BLUE, font=(FONT_NAME, FONT_SIZE))
         self.entry.pack(pady=10)
 
-        send_image_button = tk.Button(self.root, text="Upload Images", command=self.send_image, bg=LIGHT_GRAY,
-                                      fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
-        send_image_button.pack()
-
-        send_button = tk.Button(self.root, text="Send", command=lambda: self.send(self.entry), bg=LIGHT_GRAY,
-                                fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
+        send_button = tk.Button(self.root, text="Send", command=lambda: self.send(self.entry), bg=WHITE,
+                                fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
         send_button.pack()
+
+        send_image_button = tk.Button(self.root, text="Send Image", command=self.send_image, bg=WHITE,
+                                      fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
+        send_image_button.pack()
 
         self.entry.bind("<Return>", self.send)
 
@@ -112,7 +119,7 @@ class ChatApplication:
             self.client.send(self.fernet_obj.encrypt(b"/image"))
             with open(filepath, 'rb') as image_file:
                 image_data = image_file.read()
-                time.sleep(1)
+                time.sleep(0.1)
                 base64_encoded_image = base64.b64encode(image_data)
                 self.client.send(base64_encoded_image + b"/end")
 
@@ -125,18 +132,22 @@ class ChatApplication:
 
         if message:
             if message.startswith("/private"):
-                self.send_private_message(message)
+                parts = message.split(" ", 2)
+                recipient_id = parts[1] if len(parts) > 1 else None
+                self.send_private_message(message, recipient_id)
             else:
                 encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
                 self.client.send(encrypted_message)
 
             if self.text:
+                self.text.config(state=tk.NORMAL)
                 if message.startswith("/private"):
-                    message = message[10 + len(recipient_id):]
-                    self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
+                    if recipient_id:
+                        message = message[10 + len(recipient_id):]
+                        self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
                 else:
                     self.text.insert(tk.END, f"You: {message}\n")
-
+                self.text.config(state=tk.DISABLED)
             entry_widget.delete(0, tk.END)
 
     def receive_message(self):
@@ -159,8 +170,11 @@ class ChatApplication:
                     self.display_image(image_data)
                 elif self.text:
                     print(message)
+                    self.text.config(state=tk.NORMAL)
                     message = message.decode('utf-8')
                     self.text.insert(tk.END, message + '\n')
+                    self.text.config(state=tk.DISABLED)
+
             except Exception as e:
                 print(f"Error receiving message from server: {e}")
                 break
@@ -178,9 +192,7 @@ class ChatApplication:
         except Exception as e:
             print(f"Error displaying image: {e}")
 
-    def send_private_message(self, message):
-        parts = message.split(" ", 2)
-        recipient_id = parts[1] if len(parts) > 1 else None
+    def send_private_message(self, message, recipient_id):
         if recipient_id:
             encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
             self.client.send(encrypted_message)

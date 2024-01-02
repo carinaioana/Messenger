@@ -116,16 +116,16 @@ def send_image(client):
 
 
 def send_message(message, sender, sender_id):
-    for c, key in clients:
+    for recipient, key in clients:
         print(key)
-        if c != sender:
+        if recipient != sender:
             try:
                 fernet_obj = Fernet(key)
                 encrypted_message = fernet_obj.encrypt(f"Client {sender_id}: {message}".encode('utf-8'))
-                c.send(encrypted_message)
+                recipient.send(encrypted_message)
                 server_logger.info(f"Message from {sender_id}: {message}")
             except Exception as e:
-                print(f"Error broadcasting message to client {client_ids[c]}: {e}")
+                print(f"Error broadcasting message to client {client_ids[recipient]}: {e}")
 
 
 def send_private_message(message, sender, sender_id):
@@ -135,16 +135,16 @@ def send_private_message(message, sender, sender_id):
         private_message = parts[2]
 
         for recipient_id in recipient_ids:
-            for c, key in clients:
-                if c != sender and client_ids[c] == recipient_id.strip():
+            for recipient, key in clients:
+                if recipient != sender and client_ids[recipient] == recipient_id.strip():
                     try:
                         fernet_obj = Fernet(key)
                         encrypted_private_message = fernet_obj.encrypt(f"Private message from {sender_id}: "
                                                                        f"{private_message}".encode('utf-8'))
-                        c.send(encrypted_private_message)
+                        recipient.send(encrypted_private_message)
                     except Exception as e:
                         print(f"Error sending private message to client {recipient_id}: {e}")
-                        remove_client(c)
+                        remove_client(recipient)
     else:
         sender.send(
             "Invalid /private command usage. Please provide recipient IDs and a message.".encode(
