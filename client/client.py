@@ -1,12 +1,15 @@
 import base64
 import io
+import os.path
 import socket
 import threading
+import time
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
+
+from PIL import Image, ImageTk
 from cryptography.fernet import Fernet
 import rsa
-
 
 DARK_GRAY = "#3a3a3a"
 LIGHT_GRAY = "#f5f5f5"
@@ -18,6 +21,7 @@ BUFFER_SIZE = 1024
 
 class ChatApplication:
     def __init__(self):
+        self.image_references = []
         self.client_id = None
         self.entry = None
         self.text = None
@@ -89,9 +93,9 @@ class ChatApplication:
         self.entry = tk.Entry(self.root, width=50, bg=LIGHT_GRAY, fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
         self.entry.pack(pady=10)
 
-        # upload_images_button = tk.Button(self.root, text="Upload Images", command=self.upload_images, bg=LIGHT_GRAY,
-        #                                  fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
-        # upload_images_button.pack()
+        send_image_button = tk.Button(self.root, text="Upload Images", command=self.send_image, bg=LIGHT_GRAY,
+                                      fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
+        send_image_button.pack()
 
         send_button = tk.Button(self.root, text="Send", command=lambda: self.send(self.entry), bg=LIGHT_GRAY,
                                 fg=DARK_GRAY, font=(FONT_NAME, FONT_SIZE))
@@ -102,40 +106,34 @@ class ChatApplication:
         threading.Thread(target=self.receive_message, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # def upload_images(self):
-    #     f_types = [('JPG files', '*.jpg'), ('PNG files', '*.png')]
-    #     filename = tk.filedialog.askopenfilename(filetypes=f_types)
-    #     img = Image.open(filename)
-    #     img = img.resize((100, 100))
-    #     img = ImageTk.PhotoImage(img)
-    #     e1 = tk.Label(self.root)
-    #     e1.pack()
-    #     e1.image = img
-    #     e1['image'] = img
-    #     self.image_path = filename
-    #
-    # def send_images(self):
-    #     with open(self.image_path, "rb") as image_file:
-    #         image_data = base64.b64encode(image_file.read())
-    #         self.client.send(f"/image {image_data}".encode('utf-8'))
+    def send_image(self, ):
+        filepath = filedialog.askopenfilename()
+        if filepath:
+            self.client.send(self.fernet_obj.encrypt(b"/image"))
+            with open(filepath, 'rb') as image_file:
+                image_data = image_file.read()
+                time.sleep(1)
+                base64_encoded_image = base64.b64encode(image_data)
+                self.client.send(base64_encoded_image + b"/end")
 
     def send(self, event=None):
-        self.send_message_to_server(self.entry)
+        self.send_message(self.entry)
 
-    def send_message_to_server(self, entry_widget):
+    def send_message(self, entry_widget):
         message = self.entry.get()
         recipient_id = ""
 
         if message:
             if message.startswith("/private"):
-                self.send_private_message_to_server(message)
+                self.send_private_message(message)
             else:
                 encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
                 self.client.send(encrypted_message)
 
             if self.text:
                 if message.startswith("/private"):
-                    self.print_sent_private_message(message, recipient_id)
+                    message = message[10 + len(recipient_id):]
+                    self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
                 else:
                     self.text.insert(tk.END, f"You: {message}\n")
 
@@ -147,24 +145,45 @@ class ChatApplication:
                 encrypted_message = self.client.recv(BUFFER_SIZE)
                 if not encrypted_message:
                     break
-                message = self.fernet_obj.decrypt(encrypted_message).decode('utf-8')
-                if self.text:
+                message = self.fernet_obj.decrypt(encrypted_message)
+                if message[:6] == b"/image":
+                    receiving_image = True
+                    image_data = b""
+                    while receiving_image:
+                        image_data_chunk = self.client.recv(BUFFER_SIZE)
+                        if image_data_chunk.endswith(b"/end"):
+                            image_data += image_data_chunk[:-4]
+                            receiving_image = False
+                        else:
+                            image_data += image_data_chunk
+                    self.display_image(image_data)
+                elif self.text:
                     print(message)
+                    message = message.decode('utf-8')
                     self.text.insert(tk.END, message + '\n')
             except Exception as e:
                 print(f"Error receiving message from server: {e}")
                 break
 
-    def send_private_message_to_server(self, message):
+    def display_image(self, image_data):
+        try:
+            decoded_image_data = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(decoded_image_data))
+            image.thumbnail((400, 400))
+            photo = ImageTk.PhotoImage(image)
+            self.image_references.append(photo)
+            print(self.image_references)
+            self.text.image_create(tk.END, image=photo)
+            self.text.insert(tk.END, '\n')
+        except Exception as e:
+            print(f"Error displaying image: {e}")
+
+    def send_private_message(self, message):
         parts = message.split(" ", 2)
         recipient_id = parts[1] if len(parts) > 1 else None
         if recipient_id:
             encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
             self.client.send(encrypted_message)
-
-    def print_sent_private_message(self, message, recipient_id):
-        message = message[10 + len(recipient_id):]
-        self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
 
     def on_close(self):
         try:

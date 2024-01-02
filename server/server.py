@@ -20,7 +20,6 @@ clients = []
 client_ids = {}
 
 
-# Logging the message data from everyone
 def setup_server_logging():
     folder_path = 'server_chat_history'
     os.makedirs(folder_path, exist_ok=True)
@@ -50,8 +49,8 @@ server_logger = setup_server_logging()
 
 
 def handle_client(client):
-    public_key, private_key = rsa.newkeys(BUFFER_SIZE)
-    public_partner = None
+    client_fernet_key = None
+    fernet_obj = None
 
     client_id = client.recv(1024).decode('utf-8')
 
@@ -70,25 +69,50 @@ def handle_client(client):
             encrypted_message = client.recv(BUFFER_SIZE)
             if not encrypted_message:
                 break
-
-            fernet_obj = Fernet(client_fernet_key)
+            if client_fernet_key:
+                fernet_obj = Fernet(client_fernet_key)
             message = fernet_obj.decrypt(encrypted_message).decode('utf-8')
-
             if message:
-                sender_id = client_ids[client]
+                client_id = client_ids[client]
 
                 if message == "quit":
                     remove_client(client)
                     break
                 elif message.startswith("/private"):
-                    send_private_message(message, client, sender_id)
-                    break
+                    send_private_message(message, client, client_id)
+                elif message == "/image":
+                    image_data = send_image(client)
+                    handle_image(client, image_data)
                 else:
-                    send_message(message, client, sender_id)
+                    send_message(message, client, client_id)
         except Exception as e:
             remove_client(client)
             print(f"Error handling client {client_ids.get(client, 'unknown')}: {e}")
             break
+
+
+def handle_image(sender, image_data):
+    for recipient, key in clients:
+        if recipient != sender:
+            try:
+                fernet_obj = Fernet(key)
+                recipient.send(fernet_obj.encrypt(b"/image"))
+                recipient.sendall(image_data + b"/end")
+            except Exception as e:
+                print(f"Error sending image: {e}")
+
+
+def send_image(client):
+    image_data = b""
+    try:
+        while image_data[-4:] != b"/end":
+            image_data_chunk = client.recv(BUFFER_SIZE)
+            if not image_data_chunk:
+                break
+            image_data += image_data_chunk
+    except Exception as e:
+        print(f"Error receiving image data: {e}")
+    return image_data
 
 
 def send_message(message, sender, sender_id):
@@ -111,11 +135,12 @@ def send_private_message(message, sender, sender_id):
         private_message = parts[2]
 
         for recipient_id in recipient_ids:
-            for c,key in clients:
+            for c, key in clients:
                 if c != sender and client_ids[c] == recipient_id.strip():
                     try:
                         fernet_obj = Fernet(key)
-                        encrypted_private_message = fernet_obj.encrypt(f"Private message from {sender_id}: {private_message}".encode('utf-8'))
+                        encrypted_private_message = fernet_obj.encrypt(f"Private message from {sender_id}: "
+                                                                       f"{private_message}".encode('utf-8'))
                         c.send(encrypted_private_message)
                     except Exception as e:
                         print(f"Error sending private message to client {recipient_id}: {e}")
