@@ -9,10 +9,8 @@ import tkinter as tk
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
 import emoji
-
 from PIL import Image, ImageTk
 from cryptography.fernet import Fernet
-import rsa
 
 DARK_BLUE = "#283593"
 LIGHT_BLUE = "#4a90e2"
@@ -27,13 +25,11 @@ BUFFER_SIZE = 1024
 
 class ChatApplication:
     def __init__(self):
+        self.recipient_entry = None
         self.image_references = []
         self.client_id = None
         self.entry = None
         self.text = None
-
-        self.public_key, self.private_key = rsa.newkeys(BUFFER_SIZE)
-        self.public_partner = None
 
         self.fernet_key = None
         self.fernet_obj = None
@@ -96,24 +92,25 @@ class ChatApplication:
         self.text.config(state=tk.DISABLED)
 
         scrollbar = tk.Scrollbar(self.root, command=self.text.yview)
-        self.text.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.text.configure(yscrollcommand=scrollbar.set)
+
         self.text.pack(pady=10, expand=True, fill=tk.BOTH)
 
-        self.entry = tk.Entry(self.root, width=50, bg=WHITE, fg=LIGHT_BLUE, font=(FONT_NAME, FONT_SIZE))
-        self.entry.pack(pady=10)
-
-        send_button = tk.Button(self.root, text="Send", command=lambda: self.send(self.entry), bg=WHITE,
-                                fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
-        send_button.pack()
-
-        send_image_button = tk.Button(self.root, text="Send Image", command=self.send_image, bg=WHITE,
+        send_image_button = tk.Button(self.root, text="Send Image", command=self.send_type_popup, bg=WHITE,
                                       fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
-        send_image_button.pack()
+        send_image_button.pack(padx=(40, 5), side=tk.LEFT)
 
         emoji_button = tk.Button(self.root, text="Emoji List", command=self.emoji_window, bg=WHITE,
                                  fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
-        emoji_button.pack()
+        emoji_button.pack(padx=10, side=tk.LEFT)
+
+        send_button = tk.Button(self.root, text="Send", command=lambda: self.send(self.entry), bg=WHITE,
+                                fg=DARK_BLUE, font=(FONT_NAME, FONT_SIZE))
+        send_button.pack(padx=(15, 30), side=tk.RIGHT)
+
+        self.entry = tk.Entry(self.root, width=50, bg=WHITE, fg=LIGHT_BLUE, font=(FONT_NAME, FONT_SIZE))
+        self.entry.pack(pady=(5, 0))
         self.entry.bind("<Return>", self.send)
 
         threading.Thread(target=self.receive_message, daemon=True).start()
@@ -157,15 +154,60 @@ class ChatApplication:
 
         self.entry.insert(tk.END, emoji_char)
 
-    def send_image(self):
+    def send_type_popup(self):
+        send_type_popup = tk.Toplevel(self.root)
+        send_type_popup.title("Send Image")
+
+        message = tk.Label(send_type_popup, text="How would you like to send the image?")
+        message.pack()
+
+        private_image_button = tk.Button(send_type_popup, text="Send Privately",
+                                         command=self.send_image_privately_popup)
+        private_image_button.pack(side="left", padx=10, pady=10)
+
+        everyone_image_button = tk.Button(send_type_popup, text="Send to Everyone",
+                                          command=lambda: self.send_image("everyone"))
+        everyone_image_button.pack(side="right", padx=10, pady=10)
+
+    def send_image_privately_popup(self):
+        send_recipients_popup = tk.Toplevel(self.root)
+        send_recipients_popup.title("Send Image")
+
+        message = tk.Label(send_recipients_popup, text="Whom would you like to send the image to?")
+        message.pack()
+
+        self.recipient_entry = tk.Entry(send_recipients_popup)
+        self.recipient_entry.pack()
+
+        send_button = tk.Button(send_recipients_popup, text="Send", command=lambda: self.send_image("private"))
+        send_button.pack(side="right", padx=10, pady=10)
+
+    def send_image(self, choice):
+        if choice == "private":
+            self.read_image_and_send(self.recipient_entry.get())
+        elif choice == "everyone":
+            self.read_image_and_send()
+
+    def read_image_and_send(self, recipients_ids=None):
         filepath = filedialog.askopenfilename(filetypes=[('Jpg Files', '*.jpg'), ('PNG Files', '*.png')])
-        if filepath:
-            self.client.send(self.fernet_obj.encrypt(b"/image"))
-            with open(filepath, 'rb') as image_file:
-                image_data = image_file.read()
-                time.sleep(0.1)
-                base64_encoded_image = base64.b64encode(image_data)
-                self.client.send(base64_encoded_image + b"/end")
+        if recipients_ids:
+            self.client.send(self.fernet_obj.encrypt("/pimage".encode('utf-8')))
+            self.client.send(self.fernet_obj.encrypt(recipients_ids.encode('utf-8')))
+        else:
+            self.client.send(self.fernet_obj.encrypt("/image".encode('utf-8')))
+
+        with open(filepath, 'rb') as image_file:
+            image_data = image_file.read()
+            base64_encoded_image = base64.b64encode(image_data)
+
+            self.text.config(state=tk.NORMAL)
+            self.text.insert(tk.END, f"You: ")
+            self.display_image(base64_encoded_image)
+            self.text.insert(tk.END, f"\n")
+            self.text.config(state=tk.DISABLED)
+            time.sleep(0.1)
+
+            self.client.send(base64_encoded_image + b"/end")
 
     def send(self, event=None):
         self.send_message(self.entry)
@@ -211,9 +253,14 @@ class ChatApplication:
                             receiving_image = False
                         else:
                             image_data += image_data_chunk
+                    self.text.config(state=tk.NORMAL)
+                    sender_id = self.client.recv(BUFFER_SIZE)
+                    sender_id = self.fernet_obj.decrypt(sender_id)
+                    self.text.insert(tk.END, sender_id)
                     self.display_image(image_data)
+                    self.text.insert(tk.END, '\n')
+                    self.text.config(state=tk.DISABLED)
                 elif self.text:
-                    print(message)
                     self.text.config(state=tk.NORMAL)
                     message = message.decode('utf-8')
                     self.text.insert(tk.END, message + '\n')
@@ -230,7 +277,6 @@ class ChatApplication:
             image.thumbnail((400, 400))
             photo = ImageTk.PhotoImage(image)
             self.image_references.append(photo)
-            print(self.image_references)
             self.text.image_create(tk.END, image=photo)
             self.text.insert(tk.END, '\n')
         except Exception as e:
