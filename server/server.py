@@ -23,26 +23,16 @@ client_ids = {}
 def setup_server_logging():
     folder_path = 'server_chat_history'
     os.makedirs(folder_path, exist_ok=True)
-    log_file_path = os.path.join(folder_path, f"server_chat_history.json")
+    log_file_path = os.path.join(folder_path, "server_chat_history.log")
 
-    logger = logging.getLogger('server_logger')
-    logger.setLevel(logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        filename=log_file_path,
+        filemode='a'
+    )
 
-    file_handler = logging.FileHandler(log_file_path)
-
-    class JsonFormatter(logging.Formatter):
-        def format(self, record):
-            log_record = {
-                "time": self.formatTime(record, self.datefmt),
-                "message": record.getMessage()
-            }
-            return json.dumps(log_record)
-
-    formatter = JsonFormatter()
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    return logger
+    return logging.getLogger('server_logger')
 
 
 server_logger = setup_server_logging()
@@ -50,19 +40,20 @@ server_logger = setup_server_logging()
 
 def handle_client(client):
     client_fernet_key = None
+    try:
+        client_id = client.recv(1024).decode('utf-8')
 
-    client_id = client.recv(1024).decode('utf-8')
+        if client_id in client_ids.values():
+            client.send("This ID is already in use. Please try another ID.".encode('utf-8'))
+            handle_client(client)
+        else:
+            client.send(f"You are connected to the server. You can start chatting, {client_id}.".encode('utf-8'))
+            client_fernet_key = client.recv(1024)
 
-    if client_id in client_ids.values():
-        client.send("This ID is already in use. Please try another ID.".encode('utf-8'))
-        handle_client(client)
-    else:
-        client_fernet_key = client.recv(1024)
-
-        clients[client] = client_fernet_key
-        client_ids[client] = client_id
-        client.send(f"You are connected to the server. You can start chatting, {client_id}.".encode('utf-8'))
-
+            clients[client] = client_fernet_key
+            client_ids[client] = client_id
+    except Exception as e:
+        logging.error(f"Error in server while trying to log in: {e}")
     while True:
         try:
             encrypted_message = client.recv(BUFFER_SIZE)
@@ -91,7 +82,7 @@ def handle_client(client):
                     else:
                         send_message(message, client, client_id)
         except Exception as e:
-            print(f"Error handling client {client_ids.get(client, 'unknown')}: {e}")
+            server_logger.error(f"Error handling client {client_ids.get(client, 'unknown')}: {e}")
             remove_client(client)
             break
 
@@ -106,7 +97,7 @@ def send_image(sender, image_data):
                 time.sleep(0.1)
                 recipient.send(fernet_obj.encrypt(f"Image from {client_ids[sender]}: ".encode('utf-8')))
             except Exception as e:
-                print(f"Error sending image: {e}")
+                server_logger.error(f"Error sending image: {e}")
 
 
 def send_private_image(sender, image_data, recipients_ids):
@@ -120,7 +111,7 @@ def send_private_image(sender, image_data, recipients_ids):
                     time.sleep(0.1)
                     recipient.send(fernet_obj.encrypt(f"Private image from {client_ids[sender]}: ".encode('utf-8')))
                 except Exception as e:
-                    print(f"Error sending image: {e}")
+                    server_logger.error(f"Error sending image: {e}")
 
 
 def receive_image(client):
@@ -132,7 +123,7 @@ def receive_image(client):
                 break
             image_data += image_data_chunk
     except Exception as e:
-        print(f"Error receiving image data: {e}")
+        server_logger.error(f"Error receiving image data: {e}")
     return image_data
 
 
@@ -146,7 +137,7 @@ def send_message(message, sender, sender_id):
                 recipient.send(encrypted_message)
                 server_logger.info(f"Message from {sender_id}: {message}")
             except Exception as e:
-                print(f"Error broadcasting message to client {client_ids[recipient]}: {e}")
+                server_logger.error(f"Error sending the message to everyone {client_ids[recipient]}: {e}")
 
 
 def send_private_message(message, sender, sender_id):
@@ -164,7 +155,7 @@ def send_private_message(message, sender, sender_id):
                                                                        f"{private_message}".encode('utf-8'))
                         recipient.send(encrypted_private_message)
                     except Exception as e:
-                        print(f"Error sending private message to client {recipient_id}: {e}")
+                        server_logger.error(f"Error sending private message to client {recipient_id}: {e}")
                         remove_client(recipient)
     else:
         sender.send(
@@ -173,7 +164,7 @@ def send_private_message(message, sender, sender_id):
 
 
 def remove_client(client):
-    print(f"Client {client_ids[client]} disconnected")
+    server_logger.info(f"Client {client_ids[client]} disconnected")
     if client in client_ids:
         del client_ids[client]
 
@@ -186,7 +177,7 @@ def remove_client(client):
 def main():
     while True:
         client, address = server.accept()
-        print(f"Connection from {address} established")
+        server_logger.info(f"Connection from {address} established")
 
         threading.Thread(target=handle_client, args=(client,), daemon=True).start()
 

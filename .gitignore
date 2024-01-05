@@ -10,3 +10,6 @@ venv/
 
 # Ignore specific folders
 server_chat_history/
+
+# Ignore specific files
+files/client.log

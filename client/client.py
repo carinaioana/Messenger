@@ -11,6 +11,8 @@ from tkinter import ttk, filedialog, messagebox
 import emoji
 from PIL import Image, ImageTk
 from cryptography.fernet import Fernet
+import logging
+
 
 DARK_BLUE = "#283593"
 LIGHT_BLUE = "#4a90e2"
@@ -33,6 +35,11 @@ class ChatApplication:
 
         self.fernet_key = None
         self.fernet_obj = None
+
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(message)s',
+                            filename='files/client.log',
+                            filemode='a')
 
         self.host = '127.0.0.1'
         self.port = 55555
@@ -62,25 +69,30 @@ class ChatApplication:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def login(self, event=None):
-        self.fernet_key = Fernet.generate_key()
-        self.fernet_obj = Fernet(self.fernet_key)
+        try:
+            self.fernet_key = Fernet.generate_key()
+            self.fernet_obj = Fernet(self.fernet_key)
 
-        self.client_id = self.entry.get().strip()
-        if self.client_id:
+            self.client_id = self.entry.get().strip()
+            if self.client_id:
 
-            self.client.send(self.client_id.encode('utf-8'))
-            self.client.send(self.fernet_key)
+                self.client.send(self.client_id.encode('utf-8'))
+                server_response = self.client.recv(1024).decode('utf-8')
 
-            server_response = self.client.recv(1024).decode('utf-8')
+                if server_response == "This ID is already in use. Please try another ID.":
+                    messagebox.showerror("Login Failed", "This ID is already in use. Please try another ID.")
+                    return
+                elif server_response.startswith("You are connected to the server. You can start chatting"):
+                    self.client.send(self.fernet_key)
 
-            if server_response == "This ID is already in use. Please try another ID.":
-                messagebox.showerror("Login Failed", "This ID is already in use. Please try another ID.")
-            else:
-                self.create_chat_window()
-                if self.text:
-                    self.text.config(state=tk.NORMAL)
-                    self.text.insert(tk.END, server_response + '\n')
-                    self.text.config(state=tk.DISABLED)
+                    self.create_chat_window()
+                    if self.text:
+                        self.text.config(state=tk.NORMAL)
+                        self.text.insert(tk.END, server_response + '\n')
+                        self.text.config(state=tk.DISABLED)
+        except Exception as e:
+            logging.error(f"Unexpected error during login: {e}")
+            messagebox.showerror("Login Error", "An unexpected error during login occurred.")
 
     def create_chat_window(self):
         self.destroy_widgets()
@@ -189,57 +201,66 @@ class ChatApplication:
             self.read_image_and_send()
 
     def read_image_and_send(self, recipients_ids=None):
-        filepath = filedialog.askopenfilename(filetypes=[('Jpg Files', '*.jpg'), ('PNG Files', '*.png')])
-        if recipients_ids:
-            self.client.send(self.fernet_obj.encrypt("/pimage".encode('utf-8')))
-            self.client.send(self.fernet_obj.encrypt(recipients_ids.encode('utf-8')))
-        else:
-            self.client.send(self.fernet_obj.encrypt("/image".encode('utf-8')))
+        try:
+            filepath = filedialog.askopenfilename(filetypes=[('Jpg Files', '*.jpg'), ('PNG Files', '*.png')])
+            if recipients_ids:
+                self.client.send(self.fernet_obj.encrypt("/pimage".encode('utf-8')))
+                self.client.send(self.fernet_obj.encrypt(recipients_ids.encode('utf-8')))
+            else:
+                self.client.send(self.fernet_obj.encrypt("/image".encode('utf-8')))
 
-        with open(filepath, 'rb') as image_file:
-            image_data = image_file.read()
-            base64_encoded_image = base64.b64encode(image_data)
+            with open(filepath, 'rb') as image_file:
+                image_data = image_file.read()
+                base64_encoded_image = base64.b64encode(image_data)
 
-            self.text.config(state=tk.NORMAL)
-            self.text.insert(tk.END, f"You: ")
-            self.display_image(base64_encoded_image)
-            self.text.insert(tk.END, f"\n")
-            self.text.config(state=tk.DISABLED)
-            time.sleep(0.1)
+                self.text.config(state=tk.NORMAL)
+                self.text.insert(tk.END, f"You: ")
+                self.display_image(base64_encoded_image)
+                self.text.insert(tk.END, f"\n")
+                self.text.config(state=tk.DISABLED)
+                time.sleep(0.1)
 
-            self.client.send(base64_encoded_image + b"/end")
+                self.client.send(base64_encoded_image + b"/end")
+        except socket.error as e:
+            logging.error("Connection Error", f"Failed to send image: {e}")
 
     def send(self, event=None):
         self.send_message(self.entry)
 
     def send_message(self, entry_widget):
-        message = self.entry.get()
-        recipient_id = ""
+        try:
+            message = self.entry.get()
+            recipient_id = ""
 
-        if message:
-            if message.startswith("/private"):
-                parts = message.split(" ", 2)
-                recipient_id = parts[1] if len(parts) > 1 else None
-                self.send_private_message(message, recipient_id)
-            else:
-                encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
-                self.client.send(encrypted_message)
-
-            if self.text:
-                self.text.config(state=tk.NORMAL)
+            if message:
                 if message.startswith("/private"):
-                    if recipient_id:
-                        message = message[10 + len(recipient_id):]
-                        self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
+                    parts = message.split(" ", 2)
+                    recipient_id = parts[1] if len(parts) > 1 else None
+                    self.send_private_message(message, recipient_id)
+                    logging.info(f"Sent private message (to server) to {recipient_id}.")
                 else:
-                    self.text.insert(tk.END, f"You: {message}\n")
-                self.text.config(state=tk.DISABLED)
-            entry_widget.delete(0, tk.END)
+                    encrypted_message = self.fernet_obj.encrypt(message.encode('utf-8'))
+                    self.client.send(encrypted_message)
+                    logging.info(f"Sent message (to server) to everyone.")
+
+                if self.text:
+                    self.text.config(state=tk.NORMAL)
+                    if message.startswith("/private"):
+                        if recipient_id:
+                            message = message[10 + len(recipient_id):]
+                            self.text.insert(tk.END, f"Message to {recipient_id}: {message} \n")
+                    else:
+                        self.text.insert(tk.END, f"You: {message}\n")
+                    self.text.config(state=tk.DISABLED)
+                entry_widget.delete(0, tk.END)
+        except Exception as e:
+            logging.error(f"Unexpected error in send_message: {e}")
 
     def receive_message(self):
         while True:
             try:
                 encrypted_message = self.client.recv(BUFFER_SIZE)
+                logging.info("Message received from server.")
                 if not encrypted_message:
                     break
                 message = self.fernet_obj.decrypt(encrypted_message)
@@ -267,7 +288,7 @@ class ChatApplication:
                     self.text.config(state=tk.DISABLED)
 
             except Exception as e:
-                print(f"Error receiving message from server: {e}")
+                logging.error(f"Error receiving message from server: {e}")
                 break
 
     def display_image(self, image_data):
@@ -280,7 +301,7 @@ class ChatApplication:
             self.text.image_create(tk.END, image=photo)
             self.text.insert(tk.END, '\n')
         except Exception as e:
-            print(f"Error displaying image: {e}")
+            logging.error(f"Error displaying image: {e}")
 
     def send_private_message(self, message, recipient_id):
         if recipient_id:
@@ -294,7 +315,7 @@ class ChatApplication:
                 self.client.close()
                 self.root.destroy()
         except Exception as e:
-            print(f"Error closing the application: {e}")
+            logging.error(f"Error closing the application: {e}")
 
     def destroy_widgets(self):
         for widget in self.root.winfo_children():
