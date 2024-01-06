@@ -1,26 +1,27 @@
 import os
 import socket
 import threading
-import json
 import logging
 import time
 
 from cryptography.fernet import Fernet
 
+BUFFER_SIZE = 1024
+
 host = '127.0.0.1'
 port = 55555
 
-BUFFER_SIZE = 1024
-
+# creates the socket and binds it to the specified ip and port and then listens for incoming connections
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((host, port))
 server.listen()
 
-clients = {}
-client_ids = {}
+clients = {}  # stores the clients` keys`
+client_ids = {}  # stores the clients` ids`
 
 
 def setup_server_logging():
+    """ creates the chat history between clients"""
     folder_path = 'server_chat_history'
     os.makedirs(folder_path, exist_ok=True)
     log_file_path = os.path.join(folder_path, "server_chat_history.log")
@@ -41,17 +42,18 @@ server_logger = setup_server_logging()
 def handle_client(client):
     client_fernet_key = None
     try:
-        client_id = client.recv(1024).decode('utf-8')
+        client_id = client.recv(1024).decode('utf-8')  # receives the clientID
 
+        # if another client already used the ID, the user is informed to provide with another one
         if client_id in client_ids.values():
             client.send("This ID is already in use. Please try another ID.".encode('utf-8'))
             handle_client(client)
         else:
             client.send(f"You are connected to the server. You can start chatting, {client_id}.".encode('utf-8'))
-            client_fernet_key = client.recv(1024)
+            client_fernet_key = client.recv(1024)  # receives the key
 
-            clients[client] = client_fernet_key
-            client_ids[client] = client_id
+            clients[client] = client_fernet_key  # adds the key as the client socket and the value as the fernet_key
+            client_ids[client] = client_id  # adds the key as the client socket and the value as the clientID
     except Exception as e:
         logging.error(f"Error in server while trying to log in: {e}")
     while True:
@@ -88,19 +90,21 @@ def handle_client(client):
 
 
 def send_image(sender, image_data):
+    """sends the image to all the clients in the dictionary except the sender"""
     for recipient, key in clients.items():
         if recipient != sender:
             try:
                 fernet_obj = Fernet(key)
                 recipient.send(fernet_obj.encrypt(b"/image"))
-                recipient.sendall(image_data)
-                time.sleep(0.1)
+                recipient.sendall(image_data)  # continues to send data from the buffer until all data has been sent
+                time.sleep(0.1)  # the program waits so that the client receives all the image data
                 recipient.send(fernet_obj.encrypt(f"Image from {client_ids[sender]}: ".encode('utf-8')))
             except Exception as e:
                 server_logger.error(f"Error sending image: {e}")
 
 
 def send_private_image(sender, image_data, recipients_ids):
+    """sends the image privately to all the specified recipients"""
     for recipient_id in recipients_ids:
         for recipient, key in clients.items():
             if recipient != sender and client_ids[recipient] == recipient_id.strip():
@@ -117,6 +121,7 @@ def send_private_image(sender, image_data, recipients_ids):
 def receive_image(client):
     image_data = b""
     try:
+        # while the `/end` marker is not reached the server keeps receiving chunks of the image data
         while image_data[-4:] != b"/end":
             image_data_chunk = client.recv(BUFFER_SIZE)
             if not image_data_chunk:
@@ -128,8 +133,9 @@ def receive_image(client):
 
 
 def send_message(message, sender, sender_id):
+    """sends message to everyone"""
     for recipient, key in clients.items():
-        print(key)
+        # print(key)
         if recipient != sender:
             try:
                 fernet_obj = Fernet(key)
@@ -141,6 +147,7 @@ def send_message(message, sender, sender_id):
 
 
 def send_private_message(message, sender, sender_id):
+    """sends message privately to the recipients"""
     parts = message.split(" ", 2)
     if len(parts) == 3:
         recipient_ids = parts[1].split(",")
@@ -164,6 +171,8 @@ def send_private_message(message, sender, sender_id):
 
 
 def remove_client(client):
+    """if the client wants to quit the connection
+            it removes it from the dictionaries and closes the socket connection"""
     server_logger.info(f"Client {client_ids[client]} disconnected")
     if client in client_ids:
         del client_ids[client]
@@ -176,9 +185,10 @@ def remove_client(client):
 
 def main():
     while True:
-        client, address = server.accept()
+        client, address = server.accept()  # accepts connection from client
         server_logger.info(f"Connection from {address} established")
 
+        # starts a thread to handle each client
         threading.Thread(target=handle_client, args=(client,), daemon=True).start()
 
 

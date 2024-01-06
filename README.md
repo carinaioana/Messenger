@@ -23,10 +23,12 @@ To use the messenger:
     ### Sending Text to Everyone
     - simply write text in the entry box at the bottom of the page and press `Send`/`Enter`
     ### Sending Text in Private
-    - you need to use this format: `/private` `clientID` `text...`
+    - you need to use this format: `/private` `clientID` `message`
+    - you can send to multiple clients in the following format: `client1, client2`
     ### Sending Images
       - press `Send Image` and then it opens up a window with two options:`Send Privately` or `Send to Everyone`
       - if you choose `Send Privately` it opens up another window where you need to write the `clientID` you want to send the image to
+      - you can send to multiple clients in the following format: `client1, client2`
       - after selecting your option it opens up your Documents where you can select only images with .jpg and .png format
       - you can select only one photo at a time
     ### Sending Emojis
